@@ -3,7 +3,11 @@ import axios from "axios";
 import React, { useEffect, useRef, useState } from "react";
 import { Button, Platform, StyleSheet, Text, View } from "react-native";
 import { callFunction, generateText } from "../services/gemini";
-import { createPersona, sendEcho, startConversation } from "../services/tavus";
+import {
+	createNutritionistPersona,
+	sendEcho,
+	startNutritionistConversation,
+} from "../services/tavus";
 import {
 	getBatteryLevel,
 	scheduleReminder,
@@ -55,8 +59,11 @@ const functionDeclarations = [
 	},
 ];
 
-const WEBHOOK_URL = "https://your-ngrok-url/webhook"; // Replace with your ngrok webhook URL
-const CALLBACKS_URL = "https://your-ngrok-url/callbacks"; // Replace with your ngrok callbacks URL
+// Render Backend URL (replace with your actual Render URL)
+const RENDER_BACKEND_URL = "https://nutrivision-cvm8.onrender.com";
+
+const WEBHOOK_URL = `${RENDER_BACKEND_URL}/webhook`;
+const CALLBACKS_URL = `${RENDER_BACKEND_URL}/callbacks`;
 
 const VideoAINutritionist = () => {
 	const callRef = useRef(null);
@@ -67,16 +74,30 @@ const VideoAINutritionist = () => {
 	const [responseText, setResponseText] = useState("");
 	const [transcript, setTranscript] = useState([]);
 	const [error, setError] = useState(null);
+	const [personaId, setPersonaId] = useState(null);
 
 	useEffect(() => {
 		const initVideoCall = async () => {
 			try {
-				// Create Tavus persona with Gemini integration
-				const personaId = await createPersona();
+				// Create Tavus persona with Gemini integration if not already created
+				let currentPersonaId = personaId;
+				if (!currentPersonaId) {
+					const personaData = await createNutritionistPersona(
+						RENDER_BACKEND_URL + "/chat/completions"
+					);
+					currentPersonaId = personaData.persona_id;
+					setPersonaId(currentPersonaId);
+					console.log(
+						"Nutritionist Persona Created/Retrieved:",
+						currentPersonaId
+					);
+				}
+
 				// Start Tavus conversation with webhook
-				const { url, id } = await startConversation(personaId, WEBHOOK_URL);
-				setConversationUrl(url);
-				setConversationId(id);
+				const { conversation_url, conversation_id } =
+					await startNutritionistConversation(currentPersonaId, WEBHOOK_URL);
+				setConversationUrl(conversation_url);
+				setConversationId(conversation_id);
 
 				// Initialize Daily WebRTC frame (web only)
 				if (Platform.OS === "web") {
@@ -86,7 +107,7 @@ const VideoAINutritionist = () => {
 					if (containerRef.current) {
 						containerRef.current.appendChild(callRef.current.iframe());
 					}
-					callRef.current.join({ url });
+					callRef.current.join({ url: conversation_url });
 				}
 
 				// Poll webhook endpoint for callbacks (transcripts, etc.)
@@ -112,7 +133,7 @@ const VideoAINutritionist = () => {
 					const response = await processInput(inputText);
 					setResponseText(response);
 					if (!isTextMode) {
-						await sendEcho(id, response);
+						await sendEcho(conversation_id, response);
 					}
 				};
 
@@ -133,7 +154,7 @@ const VideoAINutritionist = () => {
 				callRef.current.destroy();
 			}
 		};
-	}, [isTextMode]);
+	}, [isTextMode, personaId]);
 
 	// Handles Gemini function calling and text generation
 	const processInput = async (input) => {
