@@ -6,6 +6,8 @@
  * You can remove the `reset-project` script from package.json and safely delete this file after running it.
  */
 
+
+
 const fs = require("fs");
 const path = require("path");
 const readline = require("readline");
@@ -53,7 +55,7 @@ const moveDirectories = async (userInput) => {
       console.log(`📁 /${exampleDir} directory created.`);
     }
 
-    // Move old directories to new app-example directory or delete them
+    // Move old directories to new app-example directory or dfdb fdhefhefhdvedfgedfgelete them
     for (const dir of oldDirs) {
       const oldDirPath = path.join(root, dir);
       if (fs.existsSync(oldDirPath)) {
