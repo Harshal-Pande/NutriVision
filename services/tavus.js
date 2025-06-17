@@ -1,8 +1,9 @@
 import axios from "axios";
 
+const BACKEND_BASE_URL = "https://nutrivision-cvm8.onrender.com"; // Backend URL for LLM and webhooks
+
 // Tavus CVI API integration (loads API key from environment variable)
-const TAVUS_API_KEY =
-	process.env.TAVUS_API_KEY || "sk-demo-2b7e7b7b-2b7e-4b7b-8b7b-2b7e7b7b2b7e";
+const TAVUS_API_KEY = "8afeb2823a894ae9aad50cc90fa41149";
 
 const TAVUS_BASE_URL = "https://tavusapi.com/v2";
 
@@ -20,33 +21,39 @@ export const getTavusVideoUrl = async (sessionId) => {
 };
 
 // Create a Nutritionist persona for the AI video interface
-export const createNutritionistPersona = async (backendLLMUrl) => {
+export const createNutritionistPersona = async (
+	backendLLMUrl = BACKEND_BASE_URL + "/chat/completions"
+) => {
 	try {
 		const response = await tavus.post("/personas", {
 			persona_name: "NutritionistAI",
+			default_replica_id: "r79e1c033f",
 			system_prompt:
 				"You are a friendly, evidence-based nutritionist. Give practical, healthy advice and ask questions to personalize recommendations.",
-			pipeline_mode: "full",
 			context:
 				"You help users with meal planning, healthy eating, and nutrition questions. You use up-to-date science and are supportive.",
-			default_replica_id: "r79e1c033f", // Free stock replica
 			layers: {
 				llm: {
-					model: "custom_model_here",
-					base_url: backendLLMUrl, // e.g., https://your-backend-url/chat/completions
+					model: "gemini-1.5-flash-001",
+					base_url: backendLLMUrl,
+					api_key: "AIzaSyA2qukNrTJotAh30BPrVkBqtloRSZbKJcA",
 					speculative_inference: true,
-				},
-				tts: {
-					tts_engine: "cartesia",
 				},
 				perception: {
 					perception_model: "raven-0",
+					ambient_awareness_queries: [
+						"Is the user showing an ID card?",
+						"Does the user appear distressed or uncomfortable?",
+					],
+				},
+				tts: {
+					tts_engine: "cartesia",
 				},
 				stt: {
 					stt_engine: "tavus-turbo",
 					participant_pause_sensitivity: "high",
 					participant_interrupt_sensitivity: "high",
-					smart_turn_detection: true,
+					smart_turn_detection: false,
 				},
 			},
 		});
@@ -61,10 +68,12 @@ export const createNutritionistPersona = async (backendLLMUrl) => {
 };
 
 // Start a Tavus conversation with the Nutritionist persona
-export const startNutritionistConversation = async (personaId, webhookUrl) => {
+export const startNutritionistConversation = async (
+	personaId,
+	webhookUrl = BACKEND_BASE_URL + "/webhook"
+) => {
 	try {
 		const response = await tavus.post("/conversations", {
-			replica_id: "r79e1c033f", // Free stock replica
 			persona_id: personaId,
 			conversation_name: "Nutritionist Consult",
 			callback_url: webhookUrl, // Your backend webhook endpoint

@@ -42,7 +42,8 @@ app.get("/callbacks", (req, res) => {
 // 3. OpenAI-compatible chat completions endpoint for Tavus
 app.post("/chat/completions", async (req, res) => {
 	try {
-		const { messages, model, stream, tools, ...rest } = req.body;
+		const { messages, model, stream, tools, api_key, base_url, ...rest } =
+			req.body;
 		if (!messages || !Array.isArray(messages)) {
 			return res
 				.status(400)
@@ -51,14 +52,21 @@ app.post("/chat/completions", async (req, res) => {
 		const prompt = messages.map((m) => m.content).join("\n");
 		const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 		const geminiModel = genAI.getGenerativeModel({
-			model: "gemini-1.5-flash-001",
+			model: model || "gemini-1.5-flash-001",
 		});
-		const result = await geminiModel.generateContent(prompt);
+		// If tools/function calling is present, handle accordingly (future extensibility)
+		let result;
+		if (tools) {
+			// For now, just generate content as usual; add function calling logic if needed
+			result = await geminiModel.generateContent(prompt);
+		} else {
+			result = await geminiModel.generateContent(prompt);
+		}
 		const response = {
 			id: "chatcmpl-xxx",
 			object: "chat.completion",
 			created: Math.floor(Date.now() / 1000),
-			model: "custom_model_here",
+			model: model || "gemini-1.5-flash-001",
 			choices: [
 				{
 					index: 0,
