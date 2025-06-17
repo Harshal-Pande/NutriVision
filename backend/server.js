@@ -39,7 +39,21 @@ app.get("/callbacks", (req, res) => {
 	}
 });
 
-// 3. OpenAI-compatible chat completions endpoint for Tavus
+// 3. List available Gemini models
+app.get("/models", async (req, res) => {
+	try {
+		const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+		const models = await genAI.listModels();
+		res.json(models);
+	} catch (err) {
+		console.error("Error in /models:", err);
+		res
+			.status(500)
+			.json({ error: "Failed to list models", details: err.message });
+	}
+});
+
+// 4. OpenAI-compatible chat completions endpoint for Tavus
 app.post("/chat/completions", async (req, res) => {
 	try {
 		const { messages, model, stream, tools, api_key, base_url, ...rest } =

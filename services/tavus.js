@@ -45,15 +45,37 @@ export const createNutritionistPersona = async (
 						"Is the user showing an ID card?",
 						"Does the user appear distressed or uncomfortable?",
 					],
+					perception_tool_prompt:
+						"You have a tool to notify the system when a bright outfit is detected, named `notify_if_bright_outfit_shown`. You MUST use this tool when a bright outfit is detected.",
+					perception_tools: [
+						{
+							type: "function",
+							function: {
+								name: "notify_if_bright_outfit_shown",
+								description:
+									"Use this function when a bright outfit is detected in the image with high confidence",
+								parameters: {
+									type: "object",
+									properties: {
+										outfit_color: {
+											type: "string",
+											description: "Best guess on what color of outfit it is",
+										},
+									},
+									required: ["outfit_color"],
+								},
+							},
+						},
+					],
 				},
 				tts: {
 					tts_engine: "cartesia",
 				},
 				stt: {
-					stt_engine: "tavus-turbo",
+					stt_engine: "tavus-advanced",
+					smart_turn_detection: true,
 					participant_pause_sensitivity: "high",
 					participant_interrupt_sensitivity: "high",
-					smart_turn_detection: false,
 				},
 			},
 		});
@@ -104,6 +126,20 @@ export const sendEcho = async (conversationId, text) => {
 		});
 	} catch (error) {
 		console.error("Error sending echo:", error);
+		throw error;
+	}
+};
+
+// List all personas from Tavus
+export const listPersonas = async () => {
+	try {
+		const response = await tavus.get("/personas");
+		return response.data.data; // Array of persona objects
+	} catch (error) {
+		console.error(
+			"Error listing personas:",
+			error.response?.data || error.message
+		);
 		throw error;
 	}
 };
