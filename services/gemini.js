@@ -1,33 +1,40 @@
-import { VertexAI } from "@google-cloud/aiplatform";
+import axios from "axios";
 
-const projectId = "YOUR_PROJECT_ID";
-const location = "us-central1";
-const model = "gemini-1.5-flash-001";
+const BACKEND_CHAT_COMPLETIONS_URL =
+	"https://nutrivision-cvm8.onrender.com/chat/completions";
 
-const vertexAI = new VertexAI({ project: projectId, location });
-const generativeModel = vertexAI.getGenerativeModel({ model });
-
-// Generate Text
+// Generate Text using Gemini via backend
 export const generateText = async (prompt) => {
 	try {
-		const result = await generativeModel.generateContent(prompt);
-		// Response: { response: { candidates: [ { content: { parts: [ { text: ... } ] } } ] } }
-		return result.response.candidates[0].content.parts[0].text;
+		const response = await axios.post(BACKEND_CHAT_COMPLETIONS_URL, {
+			messages: [{ role: "user", content: prompt }],
+			model: "custom_model_here",
+		});
+		return response.data.choices[0].message.content;
 	} catch (error) {
-		console.error("Error generating text:", error);
+		console.error(
+			"Error generating text via backend:",
+			error.response?.data || error.message
+		);
 		throw error;
 	}
 };
 
-// Function Calling
+// Function Calling (tools)
 export const callFunction = async (prompt, functionDeclarations) => {
 	try {
-		const chat = generativeModel.startChat({ tools: functionDeclarations });
-		const result = await chat.sendMessage(prompt);
-		// Response: { response: { candidates: [ { content: { parts: [ { functionCall: { name, args } } ] } } ] } }
-		return result.response.candidates[0].content.parts;
+		const response = await axios.post(BACKEND_CHAT_COMPLETIONS_URL, {
+			messages: [{ role: "user", content: prompt }],
+			model: "custom_model_here",
+			tools: functionDeclarations,
+		});
+		// Return the parts array (OpenAI-compatible)
+		return response.data.choices[0].message.parts || [];
 	} catch (error) {
-		console.error("Error calling function:", error);
+		console.error(
+			"Error calling function via backend:",
+			error.response?.data || error.message
+		);
 		throw error;
 	}
 };

@@ -13,10 +13,12 @@
   "dependencies": {
     "@daily-co/daily-js": "^0.80.0",
     "@expo/vector-icons": "^14.1.0",
+    "@google-cloud/aiplatform": "^4.2.0",
     "@react-navigation/bottom-tabs": "^7.3.10",
     "@react-navigation/drawer": "^7.4.1",
     "@react-navigation/elements": "^2.3.8",
     "@react-navigation/native": "^7.1.6",
+    "axios": "^1.10.0",
     "expo": "~53.0.11",
     "expo-blur": "~14.1.5",
     "expo-constants": "~17.1.6",
