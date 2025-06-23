@@ -11,7 +11,7 @@ const HomeScreen = () => {
       <StatusBar barStyle="dark-content" />
 
       <Image
-        source={require('../assets/image.png')} 
+        source={require('../assets/image.png')}
         style={styles.logo}
       />
 
@@ -23,7 +23,7 @@ const HomeScreen = () => {
 
         <TouchableOpacity
           style={styles.button}
-          onPress={() => navigation.navigate('ScanScreen')} // 🔁 Update with your real screen name
+          onPress={() => navigation.navigate('ScanScreen')} 
         >
           <Text style={styles.buttonText}>Get Started</Text>
         </TouchableOpacity>
