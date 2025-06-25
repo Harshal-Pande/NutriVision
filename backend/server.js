@@ -321,25 +321,45 @@ app.get("/tavus/conversation/:id/messages", async (req, res) => {
 app.post("/voice-assistant/transcribe", async (req, res) => {
 	try {
 		const { audioBase64 } = req.body;
+		console.log(
+			"[VoiceAssistant][Backend][Transcribe] Incoming request. audioBase64 length:",
+			audioBase64 ? audioBase64.length : 0
+		);
 		if (!audioBase64)
 			return res.status(400).json({ error: "audioBase64 required" });
 		// Google STT expects audio in base64 and config
-		const sttRes = await axios.post(
-			`https://speech.googleapis.com/v1/speech:recognize?key=${process.env.GOOGLE_STT_API_KEY}`,
-			{
-				config: {
-					encoding: "LINEAR16",
-					sampleRateHertz: 16000,
-					languageCode: "en-US",
-				},
-				audio: { content: audioBase64 },
-			}
-		);
-		const transcription =
-			sttRes.data.results?.map((r) => r.alternatives[0].transcript).join(" ") ||
-			"";
-		res.json({ transcription });
+		try {
+			console.log(
+				"[VoiceAssistant][Backend][Transcribe] Sending audio to Google STT..."
+			);
+			const sttRes = await axios.post(
+				`https://speech.googleapis.com/v1/speech:recognize?key=${process.env.GOOGLE_STT_API_KEY}`,
+				{
+					config: {
+						encoding: "LINEAR16",
+						sampleRateHertz: 16000,
+						languageCode: "en-US",
+					},
+					audio: { content: audioBase64 },
+				}
+			);
+			console.log(
+				"[VoiceAssistant][Backend][Transcribe] Google STT response:",
+				JSON.stringify(sttRes.data)
+			);
+			const transcription =
+				sttRes.data.results
+					?.map((r) => r.alternatives[0].transcript)
+					.join(" ") || "";
+			res.json({ transcription });
+		} catch (err) {
+			console.error("[VoiceAssistant][Backend][Transcribe] STT error:", err);
+			res
+				.status(500)
+				.json({ error: "Failed to transcribe audio", details: err.message });
+		}
 	} catch (err) {
+		console.error("[VoiceAssistant][Backend][Transcribe] Fatal error:", err);
 		res
 			.status(500)
 			.json({ error: "Failed to transcribe audio", details: err.message });
