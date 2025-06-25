@@ -201,8 +201,16 @@ app.post("/tavus/conversations", async (req, res) => {
 app.post("/voice-assistant/message", async (req, res) => {
 	try {
 		const { user, message } = req.body;
-		if (!user || !message)
-			return res.status(400).json({ error: "user and message required" });
+		console.log("[VoiceAssistant][Backend] Incoming request:", {
+			user,
+			message,
+		});
+		if (!user || !message) {
+			console.error("[VoiceAssistant][Backend] Missing user or message");
+			return res
+				.status(400)
+				.json({ status: "error", error: "user and message required" });
+		}
 		// Store user message
 		voiceAssistantHistory.push({
 			role: "user",
@@ -211,21 +219,55 @@ app.post("/voice-assistant/message", async (req, res) => {
 			timestamp: Date.now(),
 		});
 		// Call Gemini for AI response
-		const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-		const geminiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-		const result = await geminiModel.generateContent(message);
-		const aiText = result.response.candidates[0].content.parts[0].text;
+		let aiText = "";
+		let geminiStatus = "pending";
+		let geminiError = null;
+		try {
+			console.log("[VoiceAssistant][Backend] Connecting to Gemini...");
+			const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+			const geminiModel = genAI.getGenerativeModel({
+				model: "gemini-1.5-flash",
+			});
+			const result = await geminiModel.generateContent(message);
+			aiText = result.response.candidates[0].content.parts[0].text;
+			geminiStatus = "success";
+			console.log("[VoiceAssistant][Backend] Gemini response:", aiText);
+		} catch (err) {
+			geminiStatus = "error";
+			geminiError = err.message;
+			console.error("[VoiceAssistant][Backend] Gemini error:", err);
+			return res
+				.status(500)
+				.json({ status: "error", error: "Gemini error", details: err.message });
+		}
 		// Call Google TTS for AI response audio
-		const ttsResponse = await axios.post(
-			"https://texttospeech.googleapis.com/v1/text:synthesize?key=" +
-				process.env.GOOGLE_TTS_API_KEY,
-			{
-				input: { text: aiText },
-				voice: { languageCode: "en-US", ssmlGender: "FEMALE" },
-				audioConfig: { audioEncoding: "MP3" },
-			}
-		);
-		const audioBase64 = ttsResponse.data.audioContent;
+		let audioBase64 = null;
+		let ttsStatus = "pending";
+		let ttsError = null;
+		let ttsResponse;
+		try {
+			console.log("[VoiceAssistant][Backend] Sending text to Google TTS...");
+			ttsResponse = await axios.post(
+				"https://texttospeech.googleapis.com/v1/text:synthesize?key=" +
+					process.env.GOOGLE_TTS_API_KEY,
+				{
+					input: { text: aiText },
+					voice: { languageCode: "en-US", ssmlGender: "FEMALE" },
+					audioConfig: { audioEncoding: "MP3" },
+				}
+			);
+			audioBase64 = ttsResponse.data.audioContent;
+			ttsStatus = "success";
+			console.log(
+				"[VoiceAssistant][Backend] TTS audio generated (base64 length):",
+				audioBase64?.length
+			);
+		} catch (err) {
+			ttsStatus = "error";
+			ttsError = err.message;
+			console.error("[VoiceAssistant][Backend] TTS error:", err);
+			// Still return text if TTS fails
+		}
 		// Store AI message
 		voiceAssistantHistory.push({
 			role: "ai",
@@ -233,12 +275,24 @@ app.post("/voice-assistant/message", async (req, res) => {
 			audio: audioBase64,
 			timestamp: Date.now(),
 		});
-		res.json({ history: voiceAssistantHistory });
+		res.json({
+			status: "success",
+			geminiStatus,
+			geminiError,
+			ttsStatus,
+			ttsError,
+			history: voiceAssistantHistory,
+		});
 	} catch (err) {
-		console.error("Error in /voice-assistant/message:", err);
-		res
-			.status(500)
-			.json({ error: "Failed to process message", details: err.message });
+		console.error(
+			"[VoiceAssistant][Backend] Fatal error in /voice-assistant/message:",
+			err
+		);
+		res.status(500).json({
+			status: "error",
+			error: "Failed to process message",
+			details: err.message,
+		});
 	}
 });
 
