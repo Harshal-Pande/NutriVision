@@ -134,6 +134,15 @@ export default function TabLayout() {
 					),
 				}}
 			/>
+			<Tabs.Screen
+				name="voiceassistant"
+				options={{
+					title: "Voice Assistant",
+					tabBarIcon: ({ color }) => (
+						<IconSymbol size={28} name="mic.fill" color={color} />
+					),
+				}}
+			/>
 		</Tabs>
 	);
 }

@@ -3,7 +3,7 @@ import axios from "axios";
 const BACKEND_BASE_URL = "https://nutrivision-cvm8.onrender.com"; // Backend URL for LLM and webhooks
 
 // Tavus CVI API integration (loads API key from environment variable)
-const TAVUS_API_KEY = "512411dffe2040dd8435ba2ac491f3ca";
+const TAVUS_API_KEY = "cb58eaf0fde84b718d04f0f2828f2e7e";
 
 const TAVUS_BASE_URL = "https://tavusapi.com/v2"; // Correct Tavus API base URL
 
@@ -26,24 +26,16 @@ export const getTavusVideoUrl = async (sessionId) => {
 };
 
 // Create a Nutritionist persona for the AI video interface
-export const createNutritionistPersona = async (
-	backendLLMUrl = "https://nutrivision-cvm8.onrender.com/chat/completions"
-) => {
+export const createNutritionistPersona = async () => {
 	try {
 		const response = await tavus.post("/personas", {
 			system_prompt:
 				"You are a friendly nutritionist providing health advice, recipes, and meal prep guidance.",
 			persona_name: "NutritionistAI",
 			context:
-				"Use Gemini API for responses. Integrate with Google Maps, Calendar, and Search.",
+				"Use Tavus inbuilt LLM for responses. Integrate with Google Maps, Calendar, and Search.",
 			layers: {
-				llm: {
-					model: "gemini-1.5-flash",
-					base_url: backendLLMUrl,
-					api_key:
-						process.env.GEMINI_API_KEY ||
-						"AIzaSyA2qukNrTJotAh30BPrVkBqtloRSZbKJcA",
-				},
+				// No llm layer means Tavus will use its own LLM
 				tts: { tts_engine: "cartesia" },
 				perception: { perception_model: "raven-0" },
 			},

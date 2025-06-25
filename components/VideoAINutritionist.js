@@ -16,8 +16,8 @@ import {
 // Render Backend URL (replace with your actual Render URL)
 const RENDER_BACKEND_URL = "https://nutrivision-cvm8.onrender.com";
 
-const WEBHOOK_URL = `${RENDER_BACKEND_URL}/webhook`;
-const CALLBACKS_URL = `${RENDER_BACKEND_URL}/callbacks`;
+const WEBHOOK_URL = "https://nutrivision-cvm8.onrender.com/webhook";
+const CALLBACKS_URL = "https://nutrivision-cvm8.onrender.com/callbacks";
 
 const VideoAINutritionist = () => {
 	const callRef = useRef(null);
@@ -36,6 +36,8 @@ const VideoAINutritionist = () => {
 	const [isStartingConversation, setIsStartingConversation] = useState(false);
 	const [callbackEvents, setCallbackEvents] = useState([]);
 	const [webViewError, setWebViewError] = useState(null);
+	const [tavusTranscript, setTavusTranscript] = useState([]);
+	const [loadingTranscript, setLoadingTranscript] = useState(false);
 
 	// Log when component unmounts
 	useEffect(() => {
@@ -105,9 +107,7 @@ const VideoAINutritionist = () => {
 				// Create Tavus persona with Gemini integration if not already created
 				let currentPersonaId = personaId;
 				if (!currentPersonaId) {
-					const personaData = await createNutritionistPersona(
-						RENDER_BACKEND_URL + "/chat/completions"
-					);
+					const personaData = await createNutritionistPersona();
 					currentPersonaId =
 						personaData.persona_id || personaData.id || personaData._id;
 					setPersonaId(currentPersonaId);
@@ -127,8 +127,18 @@ const VideoAINutritionist = () => {
 						currentPersonaId,
 						WEBHOOK_URL
 					);
+					console.log(
+						"[VideoAINutritionist] Full conversation response:",
+						convo
+					);
 					conversation_url = convo.conversation_url || convo.url;
 					conversation_id = convo.conversation_id || convo.id;
+					if (!conversation_url || !conversation_id) {
+						setError(
+							"Failed to start Tavus conversation: No conversation_id or conversation_url returned. See logs for details."
+						);
+						return;
+					}
 					setConversationUrl(conversation_url);
 					setConversationId(conversation_id);
 					console.log(
@@ -152,26 +162,17 @@ const VideoAINutritionist = () => {
 					try {
 						const response = await axios.get(CALLBACKS_URL);
 						if (response.data && response.data.length > 0) {
-							setCallbackEvents(response.data);
-							// Find the latest transcript
-							const lastTranscript = response.data
-								.map((cb) => cb.transcript || cb)
-								.filter(Boolean)
-								.pop();
-							if (lastTranscript) setTranscript(lastTranscript);
-							// Log and highlight Tavus events
-							response.data.forEach((event) => {
-								if (event.event_type === "conversation.utterance") {
-									console.log("[Tavus Event] Utterance:", event);
-								} else if (event.event_type === "conversation.echo") {
-									console.log("[Tavus Event] Echo:", event);
-									if (event.properties && event.properties.audio) {
-										console.log("[Tavus Event] Echo has audio (base64)");
-									}
-								} else if (event.event_type === "conversation.respond") {
-									console.log("[Tavus Event] Respond:", event);
-								}
-							});
+							// Find the latest application.transcription_ready event
+							const lastTranscription = [...response.data]
+								.reverse()
+								.find(
+									(cb) =>
+										cb.event_type === "application.transcription_ready" &&
+										Array.isArray(cb.properties?.transcript)
+								);
+							if (lastTranscription) {
+								setTranscript(lastTranscription.properties.transcript);
+							}
 						}
 					} catch (err) {
 						// Ignore polling errors
@@ -267,6 +268,23 @@ const VideoAINutritionist = () => {
 		}
 	};
 
+	const fetchTavusTranscript = async () => {
+		if (!conversationId) return;
+		setLoadingTranscript(true);
+		try {
+			const res = await fetch(
+				`http://localhost:3001/tavus/conversation/${conversationId}/messages`
+			);
+			const data = await res.json();
+			setTavusTranscript(data.transcript || []);
+		} catch (err) {
+			setTavusTranscript([
+				{ role: "system", content: "Failed to fetch transcript." },
+			]);
+		}
+		setLoadingTranscript(false);
+	};
+
 	if (permissionError) {
 		return (
 			<View style={styles.container}>
@@ -316,10 +334,17 @@ const VideoAINutritionist = () => {
 							}}
 						/>
 						{webViewError && (
-							<Text style={{ color: "red", fontSize: 12 }}>
-								WebView Error:{" "}
-								{webViewError.description || JSON.stringify(webViewError)}
-							</Text>
+							<>
+								<Text style={{ color: "red", fontSize: 12 }}>
+									WebView Error:{" "}
+									{webViewError.description || JSON.stringify(webViewError)}
+								</Text>
+								<Button
+									title="Open Video Call in Browser"
+									onPress={() => Linking.openURL(conversationUrl)}
+									color="#007AFF"
+								/>
+							</>
 						)}
 					</>
 				) : (
@@ -347,40 +372,27 @@ const VideoAINutritionist = () => {
 				) : (
 					<Text style={styles.noChat}>No chat history yet.</Text>
 				)}
-			</View>
-
-			{/* Tavus Callback Events Debug Section */}
-			<View style={{ marginVertical: 10 }}>
-				<Text style={{ fontWeight: "bold", fontSize: 16 }}>
-					Tavus Callback Events (Debug)
-				</Text>
-				{callbackEvents.length === 0 ? (
-					<Text style={{ color: "#888", fontStyle: "italic" }}>
-						No events yet.
-					</Text>
-				) : (
-					callbackEvents.slice(-5).map((event, idx) => (
-						<View key={idx} style={{ marginBottom: 4 }}>
-							<Text style={{ fontSize: 12 }}>
-								[{event.event_type}]{" "}
-								{event.properties?.text ||
-									event.properties?.speech ||
-									JSON.stringify(event.properties)}
-							</Text>
-							{event.event_type === "conversation.echo" &&
-								event.properties?.audio && (
-									<>
-										<Text style={{ fontSize: 10, color: "#007AFF" }}>
-											[Echo has audio]
-										</Text>
-										<Button
-											title="Play Audio"
-											onPress={() => playBase64Audio(event.properties.audio)}
-										/>
-									</>
-								)}
-						</View>
-					))
+				<Button
+					title={
+						loadingTranscript ? "Loading..." : "Fetch Full Tavus Transcript"
+					}
+					onPress={fetchTavusTranscript}
+					disabled={loadingTranscript || !conversationId}
+				/>
+				{tavusTranscript.length > 0 && (
+					<View style={{ marginTop: 10 }}>
+						<Text style={{ fontWeight: "bold" }}>Full Tavus Transcript:</Text>
+						{tavusTranscript.map((msg, idx) => (
+							<View key={idx} style={{ flexDirection: "row", marginBottom: 4 }}>
+								<Text style={{ fontWeight: "bold", marginRight: 6 }}>
+									{msg.role || msg.speaker || "system"}:
+								</Text>
+								<Text style={{ flex: 1, flexWrap: "wrap" }}>
+									{msg.content || msg.text || JSON.stringify(msg)}
+								</Text>
+							</View>
+						))}
+					</View>
 				)}
 			</View>
 

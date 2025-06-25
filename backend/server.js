@@ -13,6 +13,7 @@ app.use(cors());
 app.use(bodyParser.json());
 
 let callbacks = [];
+let voiceAssistantHistory = [];
 
 // Simple in-memory rate limiter (per IP, per minute)
 const rateLimitWindowMs = 60 * 1000; // 1 minute
@@ -194,6 +195,72 @@ app.post("/tavus/conversations", async (req, res) => {
 		res
 			.status(500)
 			.json({ error: "Failed to start conversation", details: err.message });
+	}
+});
+
+app.post("/voice-assistant/message", async (req, res) => {
+	try {
+		const { user, message } = req.body;
+		if (!user || !message)
+			return res.status(400).json({ error: "user and message required" });
+		// Store user message
+		voiceAssistantHistory.push({
+			role: "user",
+			user,
+			text: message,
+			timestamp: Date.now(),
+		});
+		// Call Gemini for AI response
+		const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+		const geminiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+		const result = await geminiModel.generateContent(message);
+		const aiText = result.response.candidates[0].content.parts[0].text;
+		// Call Google TTS for AI response audio
+		const ttsResponse = await axios.post(
+			"https://texttospeech.googleapis.com/v1/text:synthesize?key=" +
+				process.env.GOOGLE_TTS_API_KEY,
+			{
+				input: { text: aiText },
+				voice: { languageCode: "en-US", ssmlGender: "FEMALE" },
+				audioConfig: { audioEncoding: "MP3" },
+			}
+		);
+		const audioBase64 = ttsResponse.data.audioContent;
+		// Store AI message
+		voiceAssistantHistory.push({
+			role: "ai",
+			text: aiText,
+			audio: audioBase64,
+			timestamp: Date.now(),
+		});
+		res.json({ history: voiceAssistantHistory });
+	} catch (err) {
+		console.error("Error in /voice-assistant/message:", err);
+		res
+			.status(500)
+			.json({ error: "Failed to process message", details: err.message });
+	}
+});
+
+app.get("/voice-assistant/history", (req, res) => {
+	res.json({ history: voiceAssistantHistory });
+});
+
+app.get("/tavus/conversation/:id/messages", async (req, res) => {
+	try {
+		const { id } = req.params;
+		const response = await tavus.get(`/conversations/${id}?verbose=true`);
+		// Try to return transcript/messages array
+		const transcript =
+			response.data.transcript ||
+			response.data.messages ||
+			response.data.data ||
+			[];
+		res.json({ transcript });
+	} catch (err) {
+		res
+			.status(500)
+			.json({ error: "Failed to fetch Tavus messages", details: err.message });
 	}
 });
 
