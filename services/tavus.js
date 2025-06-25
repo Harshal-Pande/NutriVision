@@ -3,7 +3,7 @@ import axios from "axios";
 const BACKEND_BASE_URL = "https://nutrivision-cvm8.onrender.com"; // Backend URL for LLM and webhooks
 
 // Tavus CVI API integration (loads API key from environment variable)
-const TAVUS_API_KEY = "4936acadd8e94b459eb8e3ec80573497";
+const TAVUS_API_KEY = "512411dffe2040dd8435ba2ac491f3ca";
 
 const TAVUS_BASE_URL = "https://tavusapi.com/v2"; // Correct Tavus API base URL
 
@@ -56,48 +56,15 @@ export const createNutritionistPersona = async (
 	}
 };
 
-// List all active conversations
-export const listActiveConversations = async () => {
-	try {
-		const response = await tavus.get("/conversations?status=active");
-		return response.data?.conversations || [];
-	} catch (error) {
-		console.error(
-			"Error listing active conversations:",
-			error.response?.data || error.message
-		);
-		return [];
-	}
-};
-
-// End a specific conversation
-export const endConversation = async (conversationId) => {
-	try {
-		await tavus.post(`/conversations/${conversationId}/end`);
-	} catch (error) {
-		// Ignore errors
-	}
-};
-
-// End all active conversations
-export const endAllConversations = async () => {
-	const activeConvos = await listActiveConversations();
-	await Promise.all(
-		activeConvos.map((c) => endConversation(c.conversation_id))
-	);
-};
-
 // Start a Tavus conversation with the Nutritionist persona
 export const startNutritionistConversation = async (
 	personaId,
 	webhookUrl = BACKEND_BASE_URL + "/webhook"
 ) => {
 	try {
-		// End all active conversations before starting a new one
-		await endAllConversations();
 		const response = await tavus.post("/conversations", {
 			persona_id: personaId,
-			replica_id: "r9fa0878977a", // Use the free replica
+			replica_id: "r9fa0878977a",
 			conversation_name: "Nutritionist Consult",
 			callback_url: webhookUrl,
 		});
@@ -118,11 +85,6 @@ export const startNutritionistConversation = async (
 // Send a text echo to the Tavus conversation
 export const sendEcho = async (conversationId, text) => {
 	try {
-		// Validate conversation exists and is active
-		if (!activeConversation || activeConversation.id !== conversationId) {
-			throw new Error("Invalid or inactive conversation");
-		}
-
 		const response = await tavus.post(
 			`/conversations/${conversationId}/messages`,
 			{
@@ -131,7 +93,6 @@ export const sendEcho = async (conversationId, text) => {
 				role: "user",
 			}
 		);
-
 		return response.data;
 	} catch (error) {
 		if (error.code === "ECONNABORTED") {
@@ -141,7 +102,6 @@ export const sendEcho = async (conversationId, text) => {
 		}
 		console.error("Error sending echo:", error.response?.data || error.message);
 		if (error.response?.status === 404) {
-			activeConversation = null;
 			throw new Error("Conversation not found or has ended");
 		}
 		throw error;
@@ -182,5 +142,37 @@ export const getConversationTranscript = async (conversationId) => {
 			error.response?.data || error.message
 		);
 		throw error;
+	}
+};
+
+// End (delete) a Tavus conversation
+export const endConversation = async (conversationId) => {
+	try {
+		const response = await tavus.delete(`/conversations/${conversationId}`);
+		if (activeConversation && activeConversation.id === conversationId) {
+			activeConversation = null;
+		}
+		return response.data;
+	} catch (error) {
+		console.error(
+			"Error ending conversation:",
+			error.response?.data || error.message
+		);
+		throw error;
+	}
+};
+
+// List all conversations from Tavus
+export const listConversations = async () => {
+	try {
+		const response = await tavus.get("/conversations");
+		// Try both possible keys, fallback to []
+		return response.data?.conversations || response.data?.data || [];
+	} catch (error) {
+		console.error(
+			"Error listing conversations:",
+			error.response?.data || error.message
+		);
+		return [];
 	}
 };

@@ -8,7 +8,8 @@ import { WebView } from "react-native-webview";
 import { callFunction, generateText } from "../services/gemini";
 import {
 	createNutritionistPersona,
-	getConversationTranscript,
+	endConversation,
+	listConversations,
 	sendEcho,
 	startNutritionistConversation,
 } from "../services/tavus";
@@ -82,7 +83,8 @@ const VideoAINutritionist = () => {
 	const [hasCameraPermission, setHasCameraPermission] = useState(null);
 	const [hasAudioPermission, setHasAudioPermission] = useState(null);
 	const [permissionError, setPermissionError] = useState(null);
-	const [chatHistory, setChatHistory] = useState([]);
+	const [endSessionMessage, setEndSessionMessage] = useState("");
+	const [isStartingConversation, setIsStartingConversation] = useState(false);
 
 	// Request permissions on mount
 	useEffect(() => {
@@ -108,7 +110,28 @@ const VideoAINutritionist = () => {
 
 	useEffect(() => {
 		const initVideoCall = async () => {
+			if (isStartingConversation) return;
+			setIsStartingConversation(true);
 			try {
+				// Always end all previous conversations before starting a new one
+				setEndSessionMessage("Cleaning up previous sessions. Please wait...");
+				try {
+					const allConvos = await listConversations();
+					for (const convo of allConvos) {
+						if (convo.conversation_id || convo.id) {
+							await endConversation(convo.conversation_id || convo.id);
+						}
+					}
+					setEndSessionMessage("");
+				} catch (cleanupErr) {
+					setEndSessionMessage(
+						"Could not clean up previous sessions: " +
+							(cleanupErr.message || cleanupErr)
+					);
+					setIsStartingConversation(false);
+					return;
+				}
+
 				// Create Tavus persona with Gemini integration if not already created
 				let currentPersonaId = personaId;
 				if (!currentPersonaId) {
@@ -116,6 +139,7 @@ const VideoAINutritionist = () => {
 						RENDER_BACKEND_URL + "/chat/completions"
 					);
 					console.log("Full personaData response:", personaData);
+					// Try all possible keys for ID
 					currentPersonaId =
 						personaData.persona_id || personaData.id || personaData._id;
 					setPersonaId(currentPersonaId);
@@ -142,13 +166,6 @@ const VideoAINutritionist = () => {
 						conversation_id,
 						conversation_url
 					);
-					// Only call handleVoiceInput after conversationId is set
-					if (conversation_id && !error) {
-						handleVoiceInput(
-							"Greet the user as a nutritionist.",
-							conversation_id
-						);
-					}
 				} catch (err) {
 					console.error("Error starting Tavus conversation:", err);
 					// Enhanced error handling for Tavus conversation limits
@@ -157,14 +174,43 @@ const VideoAINutritionist = () => {
 							"maximum concurrent conversations"
 						)
 					) {
-						setError(
-							"You have reached the maximum number of Tavus video sessions allowed. Please end previous sessions or try again later."
+						setEndSessionMessage(
+							"Cleaning up previous sessions. Please wait..."
 						);
+						// List and end all previous conversations, then retry
+						try {
+							const allConvos = await listConversations();
+							for (const convo of allConvos) {
+								if (convo.conversation_id || convo.id) {
+									await endConversation(convo.conversation_id || convo.id);
+								}
+							}
+							setEndSessionMessage("Previous sessions ended. Retrying...");
+							// Retry starting conversation
+							const convo = await startNutritionistConversation(
+								currentPersonaId,
+								WEBHOOK_URL
+							);
+							conversation_url = convo.conversation_url || convo.url;
+							conversation_id = convo.conversation_id || convo.id;
+							setConversationUrl(conversation_url);
+							setConversationId(conversation_id);
+							setEndSessionMessage("");
+						} catch (cleanupErr) {
+							setError(
+								"Could not clean up previous sessions: " +
+									(cleanupErr.message || cleanupErr)
+							);
+							setEndSessionMessage("");
+							setIsStartingConversation(false);
+							return;
+						}
 					} else {
 						setError(
 							"Failed to start Tavus conversation: " + (err.message || err)
 						);
 					}
+					setIsStartingConversation(false);
 					return;
 				}
 
@@ -198,32 +244,25 @@ const VideoAINutritionist = () => {
 				const interval = setInterval(pollCallbacks, 5000);
 
 				// Process voice input (simulated; Tavus Sparrow-0 handles speech-to-text)
-				const handleVoiceInput = async (inputText, convId) => {
+				const handleVoiceInput = async (inputText) => {
 					const response = await processInput(inputText);
 					setResponseText(response);
-					// Add user message to chat history
-					setChatHistory((prev) => [
-						...prev,
-						{ role: "user", content: inputText },
-						{ role: "assistant", content: response },
-					]);
 					if (!isTextMode) {
-						const idToUse = convId || conversationId;
-						if (!idToUse || error) {
+						// Only send echo if conversation_id is valid and no error
+						if (!conversation_id || error) {
 							console.warn(
-								"No valid conversationId or error present, not sending echo!"
+								"No valid conversation_id or error present, not sending echo!"
 							);
 							return;
 						}
 						try {
-							await sendEcho(idToUse, response);
-							fetchChatHistory(idToUse);
+							await sendEcho(conversation_id, response);
 						} catch (err) {
 							console.error(
 								"Error sending echo:",
 								err,
-								"conversationId:",
-								idToUse,
+								"conversation_id:",
+								conversation_id,
 								"response:",
 								response
 							);
@@ -231,9 +270,13 @@ const VideoAINutritionist = () => {
 					}
 				};
 
+				// Initial greeting
+				if (!error) handleVoiceInput("Greet the user as a nutritionist.");
+
 				return () => clearInterval(interval);
 			} catch (err) {
 				setError("Failed to start video call: " + err.message);
+				setIsStartingConversation(false);
 			}
 		};
 
@@ -287,16 +330,42 @@ const VideoAINutritionist = () => {
 		}
 	};
 
-	// Fetch and update chat history from Tavus
-	const fetchChatHistory = async (conversationId) => {
+	// Simulate voice input (replace with actual Tavus Sparrow-0 input in production)
+	const handleVoiceInput = async () => {
+		if (!conversationId) {
+			setResponseText("No active conversation. Please start a session.");
+			return;
+		}
+		const input = "Generate a low-carb vegan recipe.";
+		const response = await processInput(input);
+		setResponseText(response);
+		if (!isTextMode) {
+			try {
+				await sendEcho(conversationId, response);
+			} catch (err) {
+				console.error(
+					"Error sending echo:",
+					err,
+					"conversationId:",
+					conversationId,
+					"response:",
+					response
+				);
+			}
+		}
+	};
+
+	const handleEndConversation = async () => {
 		if (!conversationId) return;
 		try {
-			const transcriptData = await getConversationTranscript(conversationId);
-			if (transcriptData && transcriptData.transcript) {
-				setChatHistory(transcriptData.transcript);
-			}
+			await endConversation(conversationId);
+			setConversationId(null);
+			setConversationUrl(null);
+			setEndSessionMessage("Previous session ended. You can start a new one.");
 		} catch (err) {
-			console.error("Error fetching chat history:", err);
+			setEndSessionMessage(
+				"Failed to end previous session: " + (err.message || err)
+			);
 		}
 	};
 
@@ -312,6 +381,9 @@ const VideoAINutritionist = () => {
 	return (
 		<View style={styles.container}>
 			{error && <Text style={styles.error}>{error}</Text>}
+			{endSessionMessage ? (
+				<Text style={styles.response}>{endSessionMessage}</Text>
+			) : null}
 			{/* Video Call Section */}
 			{!isTextMode &&
 				(Platform.OS === "web" ? (
@@ -339,23 +411,30 @@ const VideoAINutritionist = () => {
 			{/* Chat History Section */}
 			<View style={styles.chatHistoryContainer}>
 				<Text style={styles.chatHistoryTitle}>Chat History</Text>
-				{chatHistory.map((msg, idx) => (
-					<Text key={idx}>
-						<Text style={styles.chatRole}>{msg.role}:</Text> {msg.content}
-					</Text>
-				))}
+				{Array.isArray(transcript) && transcript.length > 0 ? (
+					transcript.map((msg, idx) => (
+						<View key={idx} style={styles.chatMessage}>
+							<Text style={styles.chatRole}>{msg.role}:</Text>
+							<Text style={styles.chatContent}>{msg.content}</Text>
+						</View>
+					))
+				) : (
+					<Text style={styles.noChat}>No chat history yet.</Text>
+				)}
 			</View>
 
 			<Button
 				title={isTextMode ? "Switch to Video" : "Switch to Text"}
 				onPress={() => setIsTextMode(!isTextMode)}
 			/>
-			<Button
-				title="Test Voice Input"
-				onPress={() =>
-					handleVoiceInput("Generate a low-carb vegan recipe.", conversationId)
-				}
-			/>
+			<Button title="Test Voice Input" onPress={handleVoiceInput} />
+			{conversationId && (
+				<Button
+					title="End Current Session"
+					onPress={handleEndConversation}
+					color="#d9534f"
+				/>
+			)}
 		</View>
 	);
 };
@@ -373,6 +452,7 @@ const styles = StyleSheet.create({
 		padding: 12,
 	},
 	chatHistoryTitle: { fontWeight: "bold", fontSize: 16, marginBottom: 8 },
+	chatMessage: { flexDirection: "row", marginBottom: 6 },
 	chatRole: { fontWeight: "bold", marginRight: 6 },
 	chatContent: { flex: 1, flexWrap: "wrap" },
 	noChat: { color: "#888", fontStyle: "italic" },
