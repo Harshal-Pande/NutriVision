@@ -42,7 +42,9 @@ app.get("/callbacks", (req, res) => {
 // 3. List available Gemini models
 app.get("/models", async (req, res) => {
 	try {
-		const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+		const genAI = new GoogleGenerativeAI(
+			"AIzaSyA2qukNrTJotAh30BPrVkBqtloRSZbKJcA"
+		);
 		const models = await genAI.listModels();
 		res.json(models);
 	} catch (err) {
@@ -64,7 +66,9 @@ app.post("/chat/completions", async (req, res) => {
 				.json({ error: "Invalid request: messages array required" });
 		}
 		const prompt = messages.map((m) => m.content).join("\n");
-		const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+		const genAI = new GoogleGenerativeAI(
+			"AIzaSyA2qukNrTJotAh30BPrVkBqtloRSZbKJcA"
+		);
 		const geminiModel = genAI.getGenerativeModel({
 			model: model || "gemini-1.5-flash-001",
 		});

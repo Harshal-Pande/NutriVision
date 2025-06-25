@@ -3,7 +3,7 @@ import axios from "axios";
 const BACKEND_BASE_URL = "https://nutrivision-cvm8.onrender.com"; // Backend URL for LLM and webhooks
 
 // Tavus CVI API integration (loads API key from environment variable)
-const TAVUS_API_KEY = "8afeb2823a894ae9aad50cc90fa41149";
+const TAVUS_API_KEY = "5080efe6ecc04b1b8dbdb230a8dfcd57";
 
 const TAVUS_BASE_URL = "https://tavusapi.com/v2";
 
@@ -138,6 +138,22 @@ export const listPersonas = async () => {
 	} catch (error) {
 		console.error(
 			"Error listing personas:",
+			error.response?.data || error.message
+		);
+		throw error;
+	}
+};
+
+// Fetch the full conversation transcript (chat history) from Tavus
+export const getConversationTranscript = async (conversationId) => {
+	try {
+		const response = await tavus.get(
+			`/conversations/${conversationId}?verbose=true`
+		);
+		return response.data; // Contains transcript and other verbose info
+	} catch (error) {
+		console.error(
+			"Error fetching conversation transcript:",
 			error.response?.data || error.message
 		);
 		throw error;

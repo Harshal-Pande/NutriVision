@@ -2,6 +2,7 @@ import * as DailyIframe from "@daily-co/daily-js";
 import axios from "axios";
 import React, { useEffect, useRef, useState } from "react";
 import { Button, Platform, StyleSheet, Text, View } from "react-native";
+import { WebView } from "react-native-webview";
 import { callFunction, generateText } from "../services/gemini";
 import {
 	createNutritionistPersona,
@@ -94,10 +95,28 @@ const VideoAINutritionist = () => {
 				}
 
 				// Start Tavus conversation with webhook
-				const { conversation_url, conversation_id } =
-					await startNutritionistConversation(currentPersonaId, WEBHOOK_URL);
-				setConversationUrl(conversation_url);
-				setConversationId(conversation_id);
+				let conversation_url, conversation_id;
+				try {
+					const convo = await startNutritionistConversation(
+						currentPersonaId,
+						WEBHOOK_URL
+					);
+					conversation_url = convo.conversation_url;
+					conversation_id = convo.conversation_id;
+					setConversationUrl(conversation_url);
+					setConversationId(conversation_id);
+					console.log(
+						"Started Tavus conversation:",
+						conversation_id,
+						conversation_url
+					);
+				} catch (err) {
+					console.error("Error starting Tavus conversation:", err);
+					setError(
+						"Failed to start Tavus conversation: " + (err.message || err)
+					);
+					return;
+				}
 
 				// Initialize Daily WebRTC frame (web only)
 				if (Platform.OS === "web") {
@@ -133,7 +152,22 @@ const VideoAINutritionist = () => {
 					const response = await processInput(inputText);
 					setResponseText(response);
 					if (!isTextMode) {
-						await sendEcho(conversation_id, response);
+						if (!conversation_id) {
+							console.warn("No conversation_id when sending echo!");
+							return;
+						}
+						try {
+							await sendEcho(conversation_id, response);
+						} catch (err) {
+							console.error(
+								"Error sending echo:",
+								err,
+								"conversation_id:",
+								conversation_id,
+								"response:",
+								response
+							);
+						}
 					}
 				};
 
@@ -195,28 +229,67 @@ const VideoAINutritionist = () => {
 		const response = await processInput(input);
 		setResponseText(response);
 		if (!isTextMode) {
-			await sendEcho(conversationId, response);
+			if (!conversationId) {
+				console.warn("No conversationId when sending echo!");
+				return;
+			}
+			try {
+				await sendEcho(conversationId, response);
+			} catch (err) {
+				console.error(
+					"Error sending echo:",
+					err,
+					"conversationId:",
+					conversationId,
+					"response:",
+					response
+				);
+			}
 		}
 	};
 
 	return (
 		<View style={styles.container}>
 			{error && <Text style={styles.error}>{error}</Text>}
-			{!isTextMode && (
-				<View
-					ref={containerRef}
-					style={styles.videoContainer}
-					{...(Platform.OS !== "web" ? { nativeID: "video-container" } : {})}
-				/>
-			)}
+			{/* Video Call Section */}
+			{!isTextMode &&
+				(Platform.OS === "web" ? (
+					<View
+						ref={containerRef}
+						style={styles.videoContainer}
+						{...(Platform.OS !== "web" ? { nativeID: "video-container" } : {})}
+					/>
+				) : conversationUrl ? (
+					<WebView
+						source={{ uri: conversationUrl }}
+						style={styles.videoContainer}
+						allowsInlineMediaPlayback
+						mediaPlaybackRequiresUserAction={false}
+					/>
+				) : (
+					<Text style={styles.noVideo}>Video call not available.</Text>
+				))}
 			{isTextMode && (
 				<View>
 					<Text style={styles.response}>{responseText}</Text>
-					<Text style={styles.transcript}>
-						Transcript: {JSON.stringify(transcript, null, 2)}
-					</Text>
 				</View>
 			)}
+
+			{/* Chat History Section */}
+			<View style={styles.chatHistoryContainer}>
+				<Text style={styles.chatHistoryTitle}>Chat History</Text>
+				{Array.isArray(transcript) && transcript.length > 0 ? (
+					transcript.map((msg, idx) => (
+						<View key={idx} style={styles.chatMessage}>
+							<Text style={styles.chatRole}>{msg.role}:</Text>
+							<Text style={styles.chatContent}>{msg.content}</Text>
+						</View>
+					))
+				) : (
+					<Text style={styles.noChat}>No chat history yet.</Text>
+				)}
+			</View>
+
 			<Button
 				title={isTextMode ? "Switch to Video" : "Switch to Text"}
 				onPress={() => setIsTextMode(!isTextMode)}
@@ -232,6 +305,23 @@ const styles = StyleSheet.create({
 	response: { fontSize: 16, marginVertical: 10 },
 	transcript: { fontSize: 14, color: "#666" },
 	error: { color: "red", marginBottom: 10 },
+	chatHistoryContainer: {
+		marginTop: 24,
+		backgroundColor: "#f5f5f5",
+		borderRadius: 8,
+		padding: 12,
+	},
+	chatHistoryTitle: { fontWeight: "bold", fontSize: 16, marginBottom: 8 },
+	chatMessage: { flexDirection: "row", marginBottom: 6 },
+	chatRole: { fontWeight: "bold", marginRight: 6 },
+	chatContent: { flex: 1, flexWrap: "wrap" },
+	noChat: { color: "#888", fontStyle: "italic" },
+	noVideo: {
+		color: "#888",
+		fontStyle: "italic",
+		textAlign: "center",
+		marginVertical: 20,
+	},
 });
 
 export default VideoAINutritionist;
