@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import axios from "axios";
 import bodyParser from "body-parser";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -12,6 +13,39 @@ app.use(cors());
 app.use(bodyParser.json());
 
 let callbacks = [];
+
+// Simple in-memory rate limiter (per IP, per minute)
+const rateLimitWindowMs = 60 * 1000; // 1 minute
+const maxRequestsPerWindow = 30;
+const ipRequestCounts = {};
+
+app.use((req, res, next) => {
+	const ip = req.ip;
+	const now = Date.now();
+	if (!ipRequestCounts[ip]) ipRequestCounts[ip] = [];
+	ipRequestCounts[ip] = ipRequestCounts[ip].filter(
+		(ts) => now - ts < rateLimitWindowMs
+	);
+	if (ipRequestCounts[ip].length >= maxRequestsPerWindow) {
+		return res
+			.status(429)
+			.json({ error: "Too many requests. Please try again later." });
+	}
+	ipRequestCounts[ip].push(now);
+	next();
+});
+
+// Tavus API config
+const TAVUS_API_KEY = process.env.TAVUS_API_KEY;
+const TAVUS_BASE_URL = process.env.TAVUS_BASE_URL || "https://tavusapi.com/v2";
+const tavus = axios.create({
+	baseURL: TAVUS_BASE_URL,
+	headers: {
+		"Content-Type": "application/json",
+		"x-api-key": TAVUS_API_KEY,
+	},
+	timeout: 10000,
+});
 
 // 1. Tavus webhook endpoint
 app.post("/webhook", (req, res) => {
@@ -108,6 +142,59 @@ app.post("/chat/completions", async (req, res) => {
 // Health check endpoint for Render
 app.get("/", (req, res) => {
 	res.send("NutriVision backend is running.");
+});
+
+// List all Tavus conversations
+app.get("/tavus/conversations", async (req, res) => {
+	try {
+		const response = await tavus.get("/conversations");
+		res.json(response.data);
+	} catch (err) {
+		res
+			.status(500)
+			.json({ error: "Failed to list conversations", details: err.message });
+	}
+});
+
+// End (delete) a Tavus conversation
+app.delete("/tavus/conversations/:id", async (req, res) => {
+	try {
+		const { id } = req.params;
+		const response = await tavus.delete(`/conversations/${id}`);
+		res.json(response.data);
+	} catch (err) {
+		res
+			.status(500)
+			.json({ error: "Failed to end conversation", details: err.message });
+	}
+});
+
+// Start a new Tavus conversation after ending all previous ones
+app.post("/tavus/conversations", async (req, res) => {
+	try {
+		// End all previous conversations
+		const allConvos = await tavus.get("/conversations");
+		const convos = allConvos.data?.conversations || allConvos.data?.data || [];
+		for (const convo of convos) {
+			const cid = convo.conversation_id || convo.id;
+			if (cid) await tavus.delete(`/conversations/${cid}`);
+		}
+		// Start new conversation
+		const { persona_id, webhook_url } = req.body;
+		if (!persona_id)
+			return res.status(400).json({ error: "persona_id required" });
+		const response = await tavus.post("/conversations", {
+			persona_id,
+			replica_id: "r9fa0878977a",
+			conversation_name: "Nutritionist Consult",
+			callback_url: webhook_url,
+		});
+		res.json(response.data);
+	} catch (err) {
+		res
+			.status(500)
+			.json({ error: "Failed to start conversation", details: err.message });
+	}
 });
 
 const PORT = process.env.PORT || 3001;
