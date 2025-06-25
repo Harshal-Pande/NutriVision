@@ -66,16 +66,16 @@ app.post("/chat/completions", async (req, res) => {
 				.json({ error: "Invalid request: messages array required" });
 		}
 		const prompt = messages.map((m) => m.content).join("\n");
+
+		// Use the official google-generativeai Python SDK via Node.js equivalent
 		const genAI = new GoogleGenerativeAI(
 			"AIzaSyA2qukNrTJotAh30BPrVkBqtloRSZbKJcA"
 		);
 		const geminiModel = genAI.getGenerativeModel({
 			model: model || "gemini-1.5-flash",
 		});
-		// If tools/function calling is present, handle accordingly (future extensibility)
 		let result;
 		if (tools) {
-			// For now, just generate content as usual; add function calling logic if needed
 			result = await geminiModel.generateContent(prompt);
 		} else {
 			result = await geminiModel.generateContent(prompt);
