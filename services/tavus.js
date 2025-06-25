@@ -3,9 +3,12 @@ import axios from "axios";
 const BACKEND_BASE_URL = "https://nutrivision-cvm8.onrender.com"; // Backend URL for LLM and webhooks
 
 // Tavus CVI API integration (loads API key from environment variable)
-const TAVUS_API_KEY = "60955d873fcd4d5684fa3b4fdff5decc";
+const TAVUS_API_KEY = "4936acadd8e94b459eb8e3ec80573497";
 
-const TAVUS_BASE_URL = "https://tavusapi.com/v2";
+const TAVUS_BASE_URL = "https://tavusapi.com/v2"; // Correct Tavus API base URL
+
+// Keep track of active conversations
+let activeConversation = null;
 
 const tavus = axios.create({
 	baseURL: TAVUS_BASE_URL,
@@ -13,6 +16,8 @@ const tavus = axios.create({
 		"Content-Type": "application/json",
 		"x-api-key": TAVUS_API_KEY,
 	},
+	timeout: 10000,
+	validateStatus: (status) => status < 500,
 });
 
 export const getTavusVideoUrl = async (sessionId) => {
@@ -26,57 +31,19 @@ export const createNutritionistPersona = async (
 ) => {
 	try {
 		const response = await tavus.post("/personas", {
-			persona_name: "NutritionistAI",
-			default_replica_id: "r79e1c033f",
 			system_prompt:
-				"You are a friendly, evidence-based nutritionist. Give practical, healthy advice and ask questions to personalize recommendations.",
+				"You are a friendly nutritionist providing health advice, recipes, and meal prep guidance.",
+			persona_name: "NutritionistAI",
 			context:
-				"You help users with meal planning, healthy eating, and nutrition questions. You use up-to-date science and are supportive.",
+				"Use Gemini API for responses. Integrate with Google Maps, Calendar, and Search.",
 			layers: {
 				llm: {
-					model: "gemini-1.5-flash-001",
+					model: "gemini-1.5-flash",
 					base_url: backendLLMUrl,
 					api_key: "AIzaSyA2qukNrTJotAh30BPrVkBqtloRSZbKJcA",
-					speculative_inference: true,
 				},
-				perception: {
-					perception_model: "raven-0",
-					ambient_awareness_queries: [
-						"Is the user showing an ID card?",
-						"Does the user appear distressed or uncomfortable?",
-					],
-					perception_tool_prompt:
-						"You have a tool to notify the system when a bright outfit is detected, named `notify_if_bright_outfit_shown`. You MUST use this tool when a bright outfit is detected.",
-					perception_tools: [
-						{
-							type: "function",
-							function: {
-								name: "notify_if_bright_outfit_shown",
-								description:
-									"Use this function when a bright outfit is detected in the image with high confidence",
-								parameters: {
-									type: "object",
-									properties: {
-										outfit_color: {
-											type: "string",
-											description: "Best guess on what color of outfit it is",
-										},
-									},
-									required: ["outfit_color"],
-								},
-							},
-						},
-					],
-				},
-				tts: {
-					tts_engine: "cartesia",
-				},
-				stt: {
-					stt_engine: "tavus-advanced",
-					smart_turn_detection: true,
-					participant_pause_sensitivity: "high",
-					participant_interrupt_sensitivity: "high",
-				},
+				tts: { tts_engine: "cartesia" },
+				perception: { perception_model: "raven-0" },
 			},
 		});
 		return response.data; // { persona_id, ... }
@@ -89,19 +56,55 @@ export const createNutritionistPersona = async (
 	}
 };
 
+// List all active conversations
+export const listActiveConversations = async () => {
+	try {
+		const response = await tavus.get("/conversations?status=active");
+		return response.data?.conversations || [];
+	} catch (error) {
+		console.error(
+			"Error listing active conversations:",
+			error.response?.data || error.message
+		);
+		return [];
+	}
+};
+
+// End a specific conversation
+export const endConversation = async (conversationId) => {
+	try {
+		await tavus.post(`/conversations/${conversationId}/end`);
+	} catch (error) {
+		// Ignore errors
+	}
+};
+
+// End all active conversations
+export const endAllConversations = async () => {
+	const activeConvos = await listActiveConversations();
+	await Promise.all(
+		activeConvos.map((c) => endConversation(c.conversation_id))
+	);
+};
+
 // Start a Tavus conversation with the Nutritionist persona
 export const startNutritionistConversation = async (
 	personaId,
 	webhookUrl = BACKEND_BASE_URL + "/webhook"
 ) => {
 	try {
+		// End all active conversations before starting a new one
+		await endAllConversations();
 		const response = await tavus.post("/conversations", {
 			persona_id: personaId,
+			replica_id: "r9fa0878977a", // Use the free replica
 			conversation_name: "Nutritionist Consult",
-			callback_url: webhookUrl, // Your backend webhook endpoint
-			conversational_context:
-				"You are talking to a user who wants personalized nutrition advice.",
+			callback_url: webhookUrl,
 		});
+		activeConversation = {
+			id: response.data.conversation_id,
+			url: response.data.conversation_url,
+		};
 		return response.data; // { conversation_id, conversation_url, ... }
 	} catch (error) {
 		console.error(
@@ -115,17 +118,32 @@ export const startNutritionistConversation = async (
 // Send a text echo to the Tavus conversation
 export const sendEcho = async (conversationId, text) => {
 	try {
-		await tavus.post("/interactions", {
-			message_type: "conversation",
-			event_type: "conversation.echo",
-			conversation_id: conversationId,
-			properties: {
-				modality: "text",
-				text,
-			},
-		});
+		// Validate conversation exists and is active
+		if (!activeConversation || activeConversation.id !== conversationId) {
+			throw new Error("Invalid or inactive conversation");
+		}
+
+		const response = await tavus.post(
+			`/conversations/${conversationId}/messages`,
+			{
+				type: "text",
+				content: text,
+				role: "user",
+			}
+		);
+
+		return response.data;
 	} catch (error) {
-		console.error("Error sending echo:", error);
+		if (error.code === "ECONNABORTED") {
+			throw new Error(
+				"Connection timeout while sending message. Please check your internet connection."
+			);
+		}
+		console.error("Error sending echo:", error.response?.data || error.message);
+		if (error.response?.status === 404) {
+			activeConversation = null;
+			throw new Error("Conversation not found or has ended");
+		}
 		throw error;
 	}
 };
@@ -134,13 +152,20 @@ export const sendEcho = async (conversationId, text) => {
 export const listPersonas = async () => {
 	try {
 		const response = await tavus.get("/personas");
-		return response.data.data; // Array of persona objects
+		// Try both possible keys, fallback to []
+		return response.data?.personas || response.data?.data || [];
 	} catch (error) {
-		console.error(
-			"Error listing personas:",
-			error.response?.data || error.message
-		);
-		throw error;
+		if (error.code === "ECONNABORTED") {
+			console.error(
+				"Connection timeout while listing personas. Please check your internet connection."
+			);
+		} else {
+			console.error(
+				"Error listing personas:",
+				error.response?.data || error.message
+			);
+		}
+		return [];
 	}
 };
 

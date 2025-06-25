@@ -8,6 +8,7 @@ import { WebView } from "react-native-webview";
 import { callFunction, generateText } from "../services/gemini";
 import {
 	createNutritionistPersona,
+	getConversationTranscript,
 	sendEcho,
 	startNutritionistConversation,
 } from "../services/tavus";
@@ -81,6 +82,7 @@ const VideoAINutritionist = () => {
 	const [hasCameraPermission, setHasCameraPermission] = useState(null);
 	const [hasAudioPermission, setHasAudioPermission] = useState(null);
 	const [permissionError, setPermissionError] = useState(null);
+	const [chatHistory, setChatHistory] = useState([]);
 
 	// Request permissions on mount
 	useEffect(() => {
@@ -113,7 +115,9 @@ const VideoAINutritionist = () => {
 					const personaData = await createNutritionistPersona(
 						RENDER_BACKEND_URL + "/chat/completions"
 					);
-					currentPersonaId = personaData.persona_id;
+					console.log("Full personaData response:", personaData);
+					currentPersonaId =
+						personaData.persona_id || personaData.id || personaData._id;
 					setPersonaId(currentPersonaId);
 					console.log(
 						"Nutritionist Persona Created/Retrieved:",
@@ -128,8 +132,9 @@ const VideoAINutritionist = () => {
 						currentPersonaId,
 						WEBHOOK_URL
 					);
-					conversation_url = convo.conversation_url;
-					conversation_id = convo.conversation_id;
+					console.log("Full conversation response:", convo);
+					conversation_url = convo.conversation_url || convo.url;
+					conversation_id = convo.conversation_id || convo.id;
 					setConversationUrl(conversation_url);
 					setConversationId(conversation_id);
 					console.log(
@@ -137,6 +142,13 @@ const VideoAINutritionist = () => {
 						conversation_id,
 						conversation_url
 					);
+					// Only call handleVoiceInput after conversationId is set
+					if (conversation_id && !error) {
+						handleVoiceInput(
+							"Greet the user as a nutritionist.",
+							conversation_id
+						);
+					}
 				} catch (err) {
 					console.error("Error starting Tavus conversation:", err);
 					// Enhanced error handling for Tavus conversation limits
@@ -186,34 +198,38 @@ const VideoAINutritionist = () => {
 				const interval = setInterval(pollCallbacks, 5000);
 
 				// Process voice input (simulated; Tavus Sparrow-0 handles speech-to-text)
-				const handleVoiceInput = async (inputText) => {
+				const handleVoiceInput = async (inputText, convId) => {
 					const response = await processInput(inputText);
 					setResponseText(response);
+					// Add user message to chat history
+					setChatHistory((prev) => [
+						...prev,
+						{ role: "user", content: inputText },
+						{ role: "assistant", content: response },
+					]);
 					if (!isTextMode) {
-						// Only send echo if conversation_id is valid and no error
-						if (!conversation_id || error) {
+						const idToUse = convId || conversationId;
+						if (!idToUse || error) {
 							console.warn(
-								"No valid conversation_id or error present, not sending echo!"
+								"No valid conversationId or error present, not sending echo!"
 							);
 							return;
 						}
 						try {
-							await sendEcho(conversation_id, response);
+							await sendEcho(idToUse, response);
+							fetchChatHistory(idToUse);
 						} catch (err) {
 							console.error(
 								"Error sending echo:",
 								err,
-								"conversation_id:",
-								conversation_id,
+								"conversationId:",
+								idToUse,
 								"response:",
 								response
 							);
 						}
 					}
 				};
-
-				// Initial greeting
-				if (!error) handleVoiceInput("Greet the user as a nutritionist.");
 
 				return () => clearInterval(interval);
 			} catch (err) {
@@ -271,31 +287,16 @@ const VideoAINutritionist = () => {
 		}
 	};
 
-	// Simulate voice input (replace with actual Tavus Sparrow-0 input in production)
-	const handleVoiceInput = async () => {
-		const input = "Generate a low-carb vegan recipe.";
-		const response = await processInput(input);
-		setResponseText(response);
-		if (!isTextMode) {
-			// Only send echo if conversationId is valid and no error
-			if (!conversationId || error) {
-				console.warn(
-					"No valid conversationId or error present, not sending echo!"
-				);
-				return;
+	// Fetch and update chat history from Tavus
+	const fetchChatHistory = async (conversationId) => {
+		if (!conversationId) return;
+		try {
+			const transcriptData = await getConversationTranscript(conversationId);
+			if (transcriptData && transcriptData.transcript) {
+				setChatHistory(transcriptData.transcript);
 			}
-			try {
-				await sendEcho(conversationId, response);
-			} catch (err) {
-				console.error(
-					"Error sending echo:",
-					err,
-					"conversationId:",
-					conversationId,
-					"response:",
-					response
-				);
-			}
+		} catch (err) {
+			console.error("Error fetching chat history:", err);
 		}
 	};
 
@@ -338,23 +339,23 @@ const VideoAINutritionist = () => {
 			{/* Chat History Section */}
 			<View style={styles.chatHistoryContainer}>
 				<Text style={styles.chatHistoryTitle}>Chat History</Text>
-				{Array.isArray(transcript) && transcript.length > 0 ? (
-					transcript.map((msg, idx) => (
-						<View key={idx} style={styles.chatMessage}>
-							<Text style={styles.chatRole}>{msg.role}:</Text>
-							<Text style={styles.chatContent}>{msg.content}</Text>
-						</View>
-					))
-				) : (
-					<Text style={styles.noChat}>No chat history yet.</Text>
-				)}
+				{chatHistory.map((msg, idx) => (
+					<Text key={idx}>
+						<Text style={styles.chatRole}>{msg.role}:</Text> {msg.content}
+					</Text>
+				))}
 			</View>
 
 			<Button
 				title={isTextMode ? "Switch to Video" : "Switch to Text"}
 				onPress={() => setIsTextMode(!isTextMode)}
 			/>
-			<Button title="Test Voice Input" onPress={handleVoiceInput} />
+			<Button
+				title="Test Voice Input"
+				onPress={() =>
+					handleVoiceInput("Generate a low-carb vegan recipe.", conversationId)
+				}
+			/>
 		</View>
 	);
 };
@@ -372,7 +373,6 @@ const styles = StyleSheet.create({
 		padding: 12,
 	},
 	chatHistoryTitle: { fontWeight: "bold", fontSize: 16, marginBottom: 8 },
-	chatMessage: { flexDirection: "row", marginBottom: 6 },
 	chatRole: { fontWeight: "bold", marginRight: 6 },
 	chatContent: { flex: 1, flexWrap: "wrap" },
 	noChat: { color: "#888", fontStyle: "italic" },
