@@ -8,7 +8,7 @@ export const generateText = async (prompt) => {
 	try {
 		const response = await axios.post(BACKEND_CHAT_COMPLETIONS_URL, {
 			messages: [{ role: "user", content: prompt }],
-			model: "custom_model_here",
+			model: "gemini-1.5-flash-001",
 		});
 		return response.data.choices[0].message.content;
 	} catch (error) {
@@ -25,7 +25,7 @@ export const callFunction = async (prompt, functionDeclarations) => {
 	try {
 		const response = await axios.post(BACKEND_CHAT_COMPLETIONS_URL, {
 			messages: [{ role: "user", content: prompt }],
-			model: "custom_model_here",
+			model: "gemini-1.5-flash-001",
 			tools: functionDeclarations,
 		});
 		// Return the parts array (OpenAI-compatible)

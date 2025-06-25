@@ -70,7 +70,7 @@ app.post("/chat/completions", async (req, res) => {
 			"AIzaSyA2qukNrTJotAh30BPrVkBqtloRSZbKJcA"
 		);
 		const geminiModel = genAI.getGenerativeModel({
-			model: model || "gemini-1.5-flash-001",
+			model: model || "gemini-1.5-flash",
 		});
 		// If tools/function calling is present, handle accordingly (future extensibility)
 		let result;
@@ -84,7 +84,7 @@ app.post("/chat/completions", async (req, res) => {
 			id: "chatcmpl-xxx",
 			object: "chat.completion",
 			created: Math.floor(Date.now() / 1000),
-			model: model || "gemini-1.5-flash-001",
+			model: model || "gemini-1.5-flash",
 			choices: [
 				{
 					index: 0,

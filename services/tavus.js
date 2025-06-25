@@ -3,7 +3,7 @@ import axios from "axios";
 const BACKEND_BASE_URL = "https://nutrivision-cvm8.onrender.com"; // Backend URL for LLM and webhooks
 
 // Tavus CVI API integration (loads API key from environment variable)
-const TAVUS_API_KEY = "5080efe6ecc04b1b8dbdb230a8dfcd57";
+const TAVUS_API_KEY = "60955d873fcd4d5684fa3b4fdff5decc";
 
 const TAVUS_BASE_URL = "https://tavusapi.com/v2";
 

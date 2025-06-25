@@ -1,5 +1,7 @@
 import * as DailyIframe from "@daily-co/daily-js";
 import axios from "axios";
+import { Camera } from "expo-camera";
+import * as Linking from "expo-linking";
 import React, { useEffect, useRef, useState } from "react";
 import { Button, Platform, StyleSheet, Text, View } from "react-native";
 import { WebView } from "react-native-webview";
@@ -76,6 +78,31 @@ const VideoAINutritionist = () => {
 	const [transcript, setTranscript] = useState([]);
 	const [error, setError] = useState(null);
 	const [personaId, setPersonaId] = useState(null);
+	const [hasCameraPermission, setHasCameraPermission] = useState(null);
+	const [hasAudioPermission, setHasAudioPermission] = useState(null);
+	const [permissionError, setPermissionError] = useState(null);
+
+	// Request permissions on mount
+	useEffect(() => {
+		const requestPermissions = async () => {
+			try {
+				const { status: cameraStatus } =
+					await Camera.requestCameraPermissionsAsync();
+				const { status: audioStatus } =
+					await Camera.requestMicrophonePermissionsAsync();
+				setHasCameraPermission(cameraStatus === "granted");
+				setHasAudioPermission(audioStatus === "granted");
+				if (cameraStatus !== "granted" || audioStatus !== "granted") {
+					setPermissionError(
+						"Camera and microphone permissions are required for video calls."
+					);
+				}
+			} catch (err) {
+				setPermissionError("Failed to request camera/microphone permissions.");
+			}
+		};
+		requestPermissions();
+	}, []);
 
 	useEffect(() => {
 		const initVideoCall = async () => {
@@ -112,9 +139,20 @@ const VideoAINutritionist = () => {
 					);
 				} catch (err) {
 					console.error("Error starting Tavus conversation:", err);
-					setError(
-						"Failed to start Tavus conversation: " + (err.message || err)
-					);
+					// Enhanced error handling for Tavus conversation limits
+					if (
+						err?.response?.data?.message?.includes(
+							"maximum concurrent conversations"
+						)
+					) {
+						setError(
+							"You have reached the maximum number of Tavus video sessions allowed. Please end previous sessions or try again later."
+						);
+					} else {
+						setError(
+							"Failed to start Tavus conversation: " + (err.message || err)
+						);
+					}
 					return;
 				}
 
@@ -152,8 +190,11 @@ const VideoAINutritionist = () => {
 					const response = await processInput(inputText);
 					setResponseText(response);
 					if (!isTextMode) {
-						if (!conversation_id) {
-							console.warn("No conversation_id when sending echo!");
+						// Only send echo if conversation_id is valid and no error
+						if (!conversation_id || error) {
+							console.warn(
+								"No valid conversation_id or error present, not sending echo!"
+							);
 							return;
 						}
 						try {
@@ -172,7 +213,7 @@ const VideoAINutritionist = () => {
 				};
 
 				// Initial greeting
-				handleVoiceInput("Greet the user as a nutritionist.");
+				if (!error) handleVoiceInput("Greet the user as a nutritionist.");
 
 				return () => clearInterval(interval);
 			} catch (err) {
@@ -180,7 +221,14 @@ const VideoAINutritionist = () => {
 			}
 		};
 
-		initVideoCall();
+		// Only start Tavus conversation if permissions are granted
+		if (hasCameraPermission && hasAudioPermission) {
+			initVideoCall();
+		} else if (hasCameraPermission === false || hasAudioPermission === false) {
+			setError(
+				"Camera and microphone permissions are required to start the video call."
+			);
+		}
 
 		return () => {
 			if (callRef.current && Platform.OS === "web") {
@@ -188,7 +236,7 @@ const VideoAINutritionist = () => {
 				callRef.current.destroy();
 			}
 		};
-	}, [isTextMode, personaId]);
+	}, [hasCameraPermission, hasAudioPermission, isTextMode, personaId]);
 
 	// Handles Gemini function calling and text generation
 	const processInput = async (input) => {
@@ -229,8 +277,11 @@ const VideoAINutritionist = () => {
 		const response = await processInput(input);
 		setResponseText(response);
 		if (!isTextMode) {
-			if (!conversationId) {
-				console.warn("No conversationId when sending echo!");
+			// Only send echo if conversationId is valid and no error
+			if (!conversationId || error) {
+				console.warn(
+					"No valid conversationId or error present, not sending echo!"
+				);
 				return;
 			}
 			try {
@@ -247,6 +298,15 @@ const VideoAINutritionist = () => {
 			}
 		}
 	};
+
+	if (permissionError) {
+		return (
+			<View style={styles.container}>
+				<Text style={styles.error}>{permissionError}</Text>
+				<Button title="Open Settings" onPress={() => Linking.openSettings()} />
+			</View>
+		);
+	}
 
 	return (
 		<View style={styles.container}>
