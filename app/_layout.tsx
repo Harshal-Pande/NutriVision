@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { createDrawerNavigator } from "@react-navigation/drawer";
 import React from "react";
 
+import VoiceAssistantScreen from "../components/VoiceAssistantScreen";
 import CalendarScreen from "../screens/CalendarScreen";
 import ForumScreen from "../screens/ForumScreen";
 import HealthScreen from "../screens/HealthScreen";
@@ -123,6 +124,15 @@ export default function AppLayout() {
 				options={{
 					drawerIcon: ({ color, size }) => (
 						<Ionicons name="heart" color={color} size={size} />
+					),
+				}}
+			/>
+			<Drawer.Screen
+				name="Voice Assistant"
+				component={VoiceAssistantScreen}
+				options={{
+					drawerIcon: ({ color, size }) => (
+						<Ionicons name="mic" color={color} size={size} />
 					),
 				}}
 			/>

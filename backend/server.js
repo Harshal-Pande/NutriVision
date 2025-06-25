@@ -264,5 +264,33 @@ app.get("/tavus/conversation/:id/messages", async (req, res) => {
 	}
 });
 
+app.post("/voice-assistant/transcribe", async (req, res) => {
+	try {
+		const { audioBase64 } = req.body;
+		if (!audioBase64)
+			return res.status(400).json({ error: "audioBase64 required" });
+		// Google STT expects audio in base64 and config
+		const sttRes = await axios.post(
+			`https://speech.googleapis.com/v1/speech:recognize?key=${process.env.GOOGLE_STT_API_KEY}`,
+			{
+				config: {
+					encoding: "LINEAR16",
+					sampleRateHertz: 16000,
+					languageCode: "en-US",
+				},
+				audio: { content: audioBase64 },
+			}
+		);
+		const transcription =
+			sttRes.data.results?.map((r) => r.alternatives[0].transcript).join(" ") ||
+			"";
+		res.json({ transcription });
+	} catch (err) {
+		res
+			.status(500)
+			.json({ error: "Failed to transcribe audio", details: err.message });
+	}
+});
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
