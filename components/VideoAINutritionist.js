@@ -1,11 +1,10 @@
-import * as DailyIframe from "@daily-co/daily-js";
 import axios from "axios";
+import { Audio } from "expo-av";
 import { Camera } from "expo-camera";
 import * as Linking from "expo-linking";
 import React, { useEffect, useRef, useState } from "react";
 import { Button, Platform, StyleSheet, Text, View } from "react-native";
 import { WebView } from "react-native-webview";
-import { callFunction, generateText } from "../services/gemini";
 import {
 	createNutritionistPersona,
 	endConversation,
@@ -13,56 +12,6 @@ import {
 	sendEcho,
 	startNutritionistConversation,
 } from "../services/tavus";
-import {
-	getBatteryLevel,
-	scheduleReminder,
-	setScreenBrightness,
-} from "../utils/mobileEvents";
-
-// Function calling declarations for Gemini
-const functionDeclarations = [
-	{
-		function_declarations: [
-			{
-				name: "getBatteryLevel",
-				description: "Gets the device battery level as a percentage.",
-				parameters: { type: "object", properties: {} },
-			},
-			{
-				name: "setScreenBrightness",
-				description: "Sets the screen brightness (0 to 1).",
-				parameters: {
-					type: "object",
-					properties: {
-						brightness: { type: "number", minimum: 0, maximum: 1 },
-					},
-					required: ["brightness"],
-				},
-			},
-			{
-				name: "scheduleReminder",
-				description: "Schedules a reminder notification.",
-				parameters: {
-					type: "object",
-					properties: {
-						message: { type: "string" },
-						seconds: { type: "number" },
-					},
-					required: ["message", "seconds"],
-				},
-			},
-			{
-				name: "findStore",
-				description: "Finds nearby health food stores using Google Maps.",
-				parameters: {
-					type: "object",
-					properties: { query: { type: "string" } },
-					required: ["query"],
-				},
-			},
-		],
-	},
-];
 
 // Render Backend URL (replace with your actual Render URL)
 const RENDER_BACKEND_URL = "https://nutrivision-cvm8.onrender.com";
@@ -85,6 +34,15 @@ const VideoAINutritionist = () => {
 	const [permissionError, setPermissionError] = useState(null);
 	const [endSessionMessage, setEndSessionMessage] = useState("");
 	const [isStartingConversation, setIsStartingConversation] = useState(false);
+	const [callbackEvents, setCallbackEvents] = useState([]);
+	const [webViewError, setWebViewError] = useState(null);
+
+	// Log when component unmounts
+	useEffect(() => {
+		return () => {
+			console.log("[VideoAINutritionist] Component unmounted");
+		};
+	}, []);
 
 	// Request permissions on mount
 	useEffect(() => {
@@ -113,17 +71,30 @@ const VideoAINutritionist = () => {
 			if (isStartingConversation) return;
 			setIsStartingConversation(true);
 			try {
+				console.log(
+					"[VideoAINutritionist] Starting cleanup of previous conversations..."
+				);
 				// Always end all previous conversations before starting a new one
 				setEndSessionMessage("Cleaning up previous sessions. Please wait...");
 				try {
 					const allConvos = await listConversations();
+					console.log(
+						"[VideoAINutritionist] Conversations to end:",
+						allConvos.map((c) => c.conversation_id || c.id)
+					);
 					for (const convo of allConvos) {
 						if (convo.conversation_id || convo.id) {
 							await endConversation(convo.conversation_id || convo.id);
+							console.log(
+								`[VideoAINutritionist] Ended conversation: ${
+									convo.conversation_id || convo.id
+								}`
+							);
 						}
 					}
 					setEndSessionMessage("");
 				} catch (cleanupErr) {
+					console.error("[VideoAINutritionist] Cleanup error:", cleanupErr);
 					setEndSessionMessage(
 						"Could not clean up previous sessions: " +
 							(cleanupErr.message || cleanupErr)
@@ -131,150 +102,89 @@ const VideoAINutritionist = () => {
 					setIsStartingConversation(false);
 					return;
 				}
-
 				// Create Tavus persona with Gemini integration if not already created
 				let currentPersonaId = personaId;
 				if (!currentPersonaId) {
 					const personaData = await createNutritionistPersona(
 						RENDER_BACKEND_URL + "/chat/completions"
 					);
-					console.log("Full personaData response:", personaData);
-					// Try all possible keys for ID
 					currentPersonaId =
 						personaData.persona_id || personaData.id || personaData._id;
 					setPersonaId(currentPersonaId);
 					console.log(
-						"Nutritionist Persona Created/Retrieved:",
+						"[VideoAINutritionist] Created persona:",
 						currentPersonaId
 					);
 				}
-
 				// Start Tavus conversation with webhook
 				let conversation_url, conversation_id;
 				try {
+					console.log(
+						"[VideoAINutritionist] Starting new conversation for persona:",
+						currentPersonaId
+					);
 					const convo = await startNutritionistConversation(
 						currentPersonaId,
 						WEBHOOK_URL
 					);
-					console.log("Full conversation response:", convo);
 					conversation_url = convo.conversation_url || convo.url;
 					conversation_id = convo.conversation_id || convo.id;
 					setConversationUrl(conversation_url);
 					setConversationId(conversation_id);
 					console.log(
-						"Started Tavus conversation:",
+						"[VideoAINutritionist] Started conversation:",
 						conversation_id,
 						conversation_url
 					);
 				} catch (err) {
-					console.error("Error starting Tavus conversation:", err);
-					// Enhanced error handling for Tavus conversation limits
-					if (
-						err?.response?.data?.message?.includes(
-							"maximum concurrent conversations"
-						)
-					) {
-						setEndSessionMessage(
-							"Cleaning up previous sessions. Please wait..."
-						);
-						// List and end all previous conversations, then retry
-						try {
-							const allConvos = await listConversations();
-							for (const convo of allConvos) {
-								if (convo.conversation_id || convo.id) {
-									await endConversation(convo.conversation_id || convo.id);
-								}
-							}
-							setEndSessionMessage("Previous sessions ended. Retrying...");
-							// Retry starting conversation
-							const convo = await startNutritionistConversation(
-								currentPersonaId,
-								WEBHOOK_URL
-							);
-							conversation_url = convo.conversation_url || convo.url;
-							conversation_id = convo.conversation_id || convo.id;
-							setConversationUrl(conversation_url);
-							setConversationId(conversation_id);
-							setEndSessionMessage("");
-						} catch (cleanupErr) {
-							setError(
-								"Could not clean up previous sessions: " +
-									(cleanupErr.message || cleanupErr)
-							);
-							setEndSessionMessage("");
-							setIsStartingConversation(false);
-							return;
-						}
-					} else {
-						setError(
-							"Failed to start Tavus conversation: " + (err.message || err)
-						);
-					}
+					console.error(
+						"[VideoAINutritionist] Error starting conversation:",
+						err
+					);
+					setError(
+						"Failed to start Tavus conversation: " + (err.message || err)
+					);
 					setIsStartingConversation(false);
 					return;
 				}
-
-				// Initialize Daily WebRTC frame (web only)
-				if (Platform.OS === "web") {
-					callRef.current = DailyIframe.createFrame({
-						iframeStyle: { width: "100%", height: 500, border: "0" },
-					});
-					if (containerRef.current) {
-						containerRef.current.appendChild(callRef.current.iframe());
-					}
-					callRef.current.join({ url: conversation_url });
-				}
-
 				// Poll webhook endpoint for callbacks (transcripts, etc.)
 				const pollCallbacks = async () => {
 					try {
 						const response = await axios.get(CALLBACKS_URL);
 						if (response.data && response.data.length > 0) {
+							setCallbackEvents(response.data);
 							// Find the latest transcript
 							const lastTranscript = response.data
 								.map((cb) => cb.transcript || cb)
 								.filter(Boolean)
 								.pop();
 							if (lastTranscript) setTranscript(lastTranscript);
+							// Log and highlight Tavus events
+							response.data.forEach((event) => {
+								if (event.event_type === "conversation.utterance") {
+									console.log("[Tavus Event] Utterance:", event);
+								} else if (event.event_type === "conversation.echo") {
+									console.log("[Tavus Event] Echo:", event);
+									if (event.properties && event.properties.audio) {
+										console.log("[Tavus Event] Echo has audio (base64)");
+									}
+								} else if (event.event_type === "conversation.respond") {
+									console.log("[Tavus Event] Respond:", event);
+								}
+							});
 						}
 					} catch (err) {
 						// Ignore polling errors
 					}
 				};
 				const interval = setInterval(pollCallbacks, 5000);
-
-				// Process voice input (simulated; Tavus Sparrow-0 handles speech-to-text)
-				const handleVoiceInput = async (inputText) => {
-					const response = await processInput(inputText);
-					setResponseText(response);
-					if (!isTextMode) {
-						// Only send echo if conversation_id is valid and no error
-						if (!conversation_id || error) {
-							console.warn(
-								"No valid conversation_id or error present, not sending echo!"
-							);
-							return;
-						}
-						try {
-							await sendEcho(conversation_id, response);
-						} catch (err) {
-							console.error(
-								"Error sending echo:",
-								err,
-								"conversation_id:",
-								conversation_id,
-								"response:",
-								response
-							);
-						}
-					}
-				};
-
-				// Initial greeting
-				if (!error) handleVoiceInput("Greet the user as a nutritionist.");
-
+				setIsStartingConversation(false);
 				return () => clearInterval(interval);
 			} catch (err) {
+				console.error(
+					"[VideoAINutritionist] Fatal error in initVideoCall:",
+					err
+				);
 				setError("Failed to start video call: " + err.message);
 				setIsStartingConversation(false);
 			}
@@ -297,59 +207,35 @@ const VideoAINutritionist = () => {
 		};
 	}, [hasCameraPermission, hasAudioPermission, isTextMode, personaId]);
 
-	// Handles Gemini function calling and text generation
-	const processInput = async (input) => {
-		try {
-			const parts = await callFunction(input, functionDeclarations);
-			for (const part of parts) {
-				if (part.functionCall) {
-					const { name, args } = part.functionCall;
-					switch (name) {
-						case "getBatteryLevel":
-							const level = await getBatteryLevel();
-							return `Battery level is ${level}%.`;
-						case "setScreenBrightness":
-							await setScreenBrightness(args.brightness);
-							return `Screen brightness set to ${args.brightness * 100}%.`;
-						case "scheduleReminder":
-							await scheduleReminder(args.message, args.seconds);
-							return `Reminder scheduled: ${args.message} in ${args.seconds} seconds.`;
-						case "findStore":
-							// Placeholder for Google Maps API (implement in googleMaps.js)
-							return `Searching for ${args.query}... (Maps integration pending)`;
-						default:
-							return "Unknown function.";
-					}
-				} else {
-					return await generateText(input);
-				}
-			}
-			return "No response generated.";
-		} catch (err) {
-			return "Error processing input: " + err.message;
-		}
-	};
-
 	// Simulate voice input (replace with actual Tavus Sparrow-0 input in production)
 	const handleVoiceInput = async () => {
 		if (!conversationId) {
 			setResponseText("No active conversation. Please start a session.");
+			console.warn(
+				"[VideoAINutritionist] No active conversationId when trying to send echo."
+			);
 			return;
 		}
-		const input = "Generate a low-carb vegan recipe.";
-		const response = await processInput(input);
-		setResponseText(response);
+		const input = "Hello";
+		setResponseText(input);
 		if (!isTextMode) {
 			try {
-				await sendEcho(conversationId, response);
+				console.log(
+					"[VideoAINutritionist] Sending echo. conversationId:",
+					conversationId,
+					"input:",
+					input
+				);
+				await sendEcho(conversationId, input);
+				console.log("[VideoAINutritionist] Echo sent successfully.");
 			} catch (err) {
 				console.error(
-					"Error sending echo:",
+					"[VideoAINutritionist] Error sending echo:",
 					err,
 					"conversationId:",
 					conversationId,
-					"response:",
-					response
+					"input:",
+					input
 				);
 			}
 		}
@@ -366,6 +252,18 @@ const VideoAINutritionist = () => {
 			setEndSessionMessage(
 				"Failed to end previous session: " + (err.message || err)
 			);
+		}
+	};
+
+	// Play base64 audio (PCM or WAV) using Expo AV
+	const playBase64Audio = async (base64Audio) => {
+		try {
+			// Convert base64 to URI for Expo AV
+			const uri = `data:audio/wav;base64,${base64Audio}`;
+			const { sound } = await Audio.Sound.createAsync({ uri });
+			await sound.playAsync();
+		} catch (err) {
+			console.error("[VideoAINutritionist] Error playing audio:", err);
 		}
 	};
 
@@ -386,21 +284,49 @@ const VideoAINutritionist = () => {
 			) : null}
 			{/* Video Call Section */}
 			{!isTextMode &&
-				(Platform.OS === "web" ? (
-					<View
-						ref={containerRef}
-						style={styles.videoContainer}
-						{...(Platform.OS !== "web" ? { nativeID: "video-container" } : {})}
-					/>
-				) : conversationUrl ? (
-					<WebView
-						source={{ uri: conversationUrl }}
-						style={styles.videoContainer}
-						allowsInlineMediaPlayback
-						mediaPlaybackRequiresUserAction={false}
-					/>
+				(conversationUrl ? (
+					<>
+						{console.log(
+							"[VideoAINutritionist] Rendering WebView with conversationUrl:",
+							conversationUrl
+						)}
+						<WebView
+							source={{ uri: conversationUrl }}
+							style={styles.videoContainer}
+							allowsInlineMediaPlayback
+							mediaPlaybackRequiresUserAction={false}
+							onError={(e) => {
+								console.error(
+									"[VideoAINutritionist] WebView onError:",
+									e.nativeEvent
+								);
+								setWebViewError(e.nativeEvent);
+							}}
+							onLoad={(e) => {
+								console.log(
+									"[VideoAINutritionist] WebView onLoad:",
+									e.nativeEvent
+								);
+							}}
+							onLoadEnd={(e) => {
+								console.log(
+									"[VideoAINutritionist] WebView onLoadEnd:",
+									e.nativeEvent
+								);
+							}}
+						/>
+						{webViewError && (
+							<Text style={{ color: "red", fontSize: 12 }}>
+								WebView Error:{" "}
+								{webViewError.description || JSON.stringify(webViewError)}
+							</Text>
+						)}
+					</>
 				) : (
-					<Text style={styles.noVideo}>Video call not available.</Text>
+					<Text style={styles.noVideo}>
+						Video call not available. (conversationUrl:{" "}
+						{String(conversationUrl)})
+					</Text>
 				))}
 			{isTextMode && (
 				<View>
@@ -420,6 +346,41 @@ const VideoAINutritionist = () => {
 					))
 				) : (
 					<Text style={styles.noChat}>No chat history yet.</Text>
+				)}
+			</View>
+
+			{/* Tavus Callback Events Debug Section */}
+			<View style={{ marginVertical: 10 }}>
+				<Text style={{ fontWeight: "bold", fontSize: 16 }}>
+					Tavus Callback Events (Debug)
+				</Text>
+				{callbackEvents.length === 0 ? (
+					<Text style={{ color: "#888", fontStyle: "italic" }}>
+						No events yet.
+					</Text>
+				) : (
+					callbackEvents.slice(-5).map((event, idx) => (
+						<View key={idx} style={{ marginBottom: 4 }}>
+							<Text style={{ fontSize: 12 }}>
+								[{event.event_type}]{" "}
+								{event.properties?.text ||
+									event.properties?.speech ||
+									JSON.stringify(event.properties)}
+							</Text>
+							{event.event_type === "conversation.echo" &&
+								event.properties?.audio && (
+									<>
+										<Text style={{ fontSize: 10, color: "#007AFF" }}>
+											[Echo has audio]
+										</Text>
+										<Button
+											title="Play Audio"
+											onPress={() => playBase64Audio(event.properties.audio)}
+										/>
+									</>
+								)}
+						</View>
+					))
 				)}
 			</View>
 

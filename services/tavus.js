@@ -27,7 +27,7 @@ export const getTavusVideoUrl = async (sessionId) => {
 
 // Create a Nutritionist persona for the AI video interface
 export const createNutritionistPersona = async (
-	backendLLMUrl = BACKEND_BASE_URL + "/chat/completions"
+	backendLLMUrl = "https://nutrivision-cvm8.onrender.com/chat/completions"
 ) => {
 	try {
 		const response = await tavus.post("/personas", {
@@ -40,7 +40,9 @@ export const createNutritionistPersona = async (
 				llm: {
 					model: "gemini-1.5-flash",
 					base_url: backendLLMUrl,
-					api_key: "AIzaSyA2qukNrTJotAh30BPrVkBqtloRSZbKJcA",
+					api_key:
+						process.env.GEMINI_API_KEY ||
+						"AIzaSyA2qukNrTJotAh30BPrVkBqtloRSZbKJcA",
 				},
 				tts: { tts_engine: "cartesia" },
 				perception: { perception_model: "raven-0" },
@@ -85,6 +87,10 @@ export const startNutritionistConversation = async (
 // Send a text echo to the Tavus conversation
 export const sendEcho = async (conversationId, text) => {
 	try {
+		console.log(
+			`[tavus.js] sendEcho: Sending to conversationId=${conversationId}, text=`,
+			text
+		);
 		const response = await tavus.post(
 			`/conversations/${conversationId}/messages`,
 			{
@@ -93,17 +99,28 @@ export const sendEcho = async (conversationId, text) => {
 				role: "user",
 			}
 		);
+		console.log(
+			`[tavus.js] sendEcho: Response status=${response.status}, data=`,
+			response.data
+		);
+		if (response.status !== 200 && response.status !== 201) {
+			console.error(
+				`[tavus.js] sendEcho: Unexpected status code:`,
+				response.status,
+				response.data
+			);
+			throw new Error(`Echo not accepted by Tavus: ${response.status}`);
+		}
+		if (response.data && response.data.error) {
+			console.error(
+				`[tavus.js] sendEcho: Error in response:`,
+				response.data.error
+			);
+			throw new Error(`Echo error: ${response.data.error}`);
+		}
 		return response.data;
 	} catch (error) {
-		if (error.code === "ECONNABORTED") {
-			throw new Error(
-				"Connection timeout while sending message. Please check your internet connection."
-			);
-		}
-		console.error("Error sending echo:", error.response?.data || error.message);
-		if (error.response?.status === 404) {
-			throw new Error("Conversation not found or has ended");
-		}
+		console.error(`[tavus.js] sendEcho: Error sending echo:`, error);
 		throw error;
 	}
 };
